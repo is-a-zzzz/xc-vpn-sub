@@ -22,7 +22,7 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let app = Router::new().route("/", get(get_sub));
+    let app = Router::new().route("/", get(get_sub)).route("/res", get(get_sub_res));
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
     info!("listening on {}", addr);
@@ -39,6 +39,29 @@ async fn get_sub() -> Response {
             tracing::error!("Failed to get subscription link: {}", e);
             (http::StatusCode::INTERNAL_SERVER_ERROR, format!("Error: {}", e)).into_response()
         }
+    }
+}
+
+#[tracing::instrument]
+async fn get_sub_res() -> Response {
+    match get_subscription_msg().await {
+        Ok(msg) => msg.into_response(),
+        Err(e) => {
+            tracing::error!("Failed to get subscription link: {}", e);
+            (http::StatusCode::INTERNAL_SERVER_ERROR, format!("Error: {}", e)).into_response()
+        }
+    }
+}
+#[tracing::instrument]
+async fn get_subscription_msg() -> anyhow::Result<String> {
+    let client = Client::builder().build()?;
+    let link = get_subscription_link().await?;
+    let subscribe_msg_res = client.get(link).send().await?;
+    if subscribe_msg_res.status().is_success() {
+        let body = subscribe_msg_res.text().await?;
+        Ok(body)
+    } else {
+        anyhow::bail!("'subscribe_url' not found in the response.")
     }
 }
 
