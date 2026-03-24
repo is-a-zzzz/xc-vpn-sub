@@ -1,39 +1,53 @@
-use crate::client::HttpClient;
 use crate::config::Config;
 use crate::error::{AppError, Result};
 use reqwest::header::HeaderMap;
+use reqwest::Client;
 use serde_json::Value;
-use std::collections::HashMap;
 use tracing::{debug, info};
 
 #[derive(Clone)]
 pub struct VpnService {
-    client: HttpClient,
     config: Config,
+    api_client: Client,
+    sub_client: Client,
 }
 
 impl VpnService {
-    pub fn new(client: HttpClient, config: Config) -> Self {
-        Self { client, config }
+    pub fn new(config: &Config) -> Self {
+        let api_client = Client::builder()
+            .cookie_store(true)
+            .build()
+            .expect("Failed to create API client");
+
+        let sub_client = Client::builder()
+            .build()
+            .expect("Failed to create subscription client");
+
+        Self {
+            config: config.clone(),
+            api_client,
+            sub_client,
+        }
     }
 
     pub async fn get_subscription_link(&self) -> Result<String> {
         let auth_data = self.login().await?;
-        self.fetch_subscribe_url(&auth_data).await
+        self.resolve_subscribe_url(&auth_data).await
     }
 
     pub async fn get_subscription_msg(&self, client_headers: Option<HeaderMap>) -> Result<String> {
         let link = self.get_subscription_link().await?;
         debug!("Fetching subscription message from: {}", link);
 
-        let mut request = self.client.client().get(&link);
+        let mut request = self.sub_client.get(&link);
 
-        // 转发客户端的请求头（包括 Cookie、User-Agent 等）
         if let Some(headers) = client_headers {
             debug!("Forwarding {} headers from client request", headers.len());
             for (name, value) in headers.iter() {
-                // 跳过一些不应该转发的头
-                if matches!(name.as_str(), "host" | "connection" | "content-length" | "transfer-encoding") {
+                if matches!(
+                    name.as_str(),
+                    "host" | "connection" | "content-length" | "transfer-encoding"
+                ) {
                     continue;
                 }
                 debug!("Forwarding header: {}", name);
@@ -44,8 +58,7 @@ impl VpnService {
         let response = request.send().await?;
 
         if response.status().is_success() {
-            let body = response.text().await?;
-            Ok(body)
+            Ok(response.text().await?)
         } else {
             Err(AppError::Custom(format!(
                 "Failed to fetch subscription message. Status: {}",
@@ -57,85 +70,85 @@ impl VpnService {
     async fn login(&self) -> Result<String> {
         info!("Logging in to {}...", self.config.login_url);
 
-        let mut form_data = HashMap::new();
-        form_data.insert("email", self.config.xcvpn_email.clone());
-        form_data.insert("password", self.config.xcvpn_password.clone());
+        let body = serde_json::json!({
+            "email": self.config.xcvpn_email,
+            "password": self.config.xcvpn_password,
+        });
 
         let response = self
-            .client
-            .client()
+            .api_client
             .post(&self.config.login_url)
-            .json(&form_data)
+            .json(&body)
             .send()
             .await?;
 
         let status = response.status();
-        let body = response.text().await?;
+        let text = response.text().await?;
 
         if !status.is_success() {
-            return Err(AppError::LoginFailed { status, body });
+            return Err(AppError::LoginFailed { status, body: text });
         }
 
         info!("Login successful.");
-        let json_body: Value = serde_json::from_str(&body)?;
+        let json: Value = serde_json::from_str(&text)?;
 
-        json_body["data"]["auth_data"]
+        json["data"]["auth_data"]
             .as_str()
             .map(|s| s.to_string())
             .ok_or(AppError::AuthDataNotFound)
     }
 
-    async fn fetch_subscribe_url(&self, auth_data: &str) -> Result<String> {
+    async fn resolve_subscribe_url(&self, auth_data: &str) -> Result<String> {
+        let auth_header: reqwest::header::HeaderValue = auth_data.parse()?;
+
+        // 第一步：在 xcvpn.us 创建 ticket
         info!("Creating ticket from {}...", self.config.create_ticket_url);
 
-        let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert("Authorization", auth_data.parse()?);
-
-        // 第一步：POST createTicket 获取 next_url（需要空 JSON body）
         let response = self
-            .client
-            .client()
+            .api_client
             .post(&self.config.create_ticket_url)
-            .headers(headers.clone())
+            .header("Authorization", auth_header.clone())
             .json(&serde_json::json!({}))
             .send()
             .await?;
 
         let status = response.status();
-        let body = response.text().await?;
+        let text = response.text().await?;
 
         if !status.is_success() {
-            return Err(AppError::TicketFailed { status, body });
+            return Err(AppError::TicketFailed { status, body: text });
         }
 
-        let json_body: Value = serde_json::from_str(&body)?;
-        let next_url = json_body["data"]["next_url"]
+        let json: Value = serde_json::from_str(&text)?;
+        let next_url = json["data"]["next_url"]
             .as_str()
             .map(|s| s.to_string())
             .ok_or(AppError::TicketUrlNotFound)?;
 
-        info!("Ticket created, fetching secure subscribe from: {}", next_url);
+        info!(
+            "Ticket created, fetching secure subscribe from: {}",
+            next_url
+        );
 
-        // 第二步：GET next_url 获取最终的 secureSubscribe URL
+        // 第二步：在 xcsuburl.kilxs.cn 解析 ticket（无 cookie，避免 session 复用导致 token 缓存）
         let response = self
-            .client
-            .client()
+            .sub_client
             .get(&next_url)
-            .headers(headers)
+            .header("Authorization", auth_header)
             .send()
             .await?;
 
         let status = response.status();
-        let body = response.text().await?;
+        let text = response.text().await?;
 
         if !status.is_success() {
-            return Err(AppError::SubscribeFailed { status, body });
+            return Err(AppError::SubscribeFailed { status, body: text });
         }
 
         info!("Secure subscribe URL fetched successfully.");
-        let json_body: Value = serde_json::from_str(&body)?;
+        let json: Value = serde_json::from_str(&text)?;
 
-        json_body["data"]["url"]
+        json["data"]["url"]
             .as_str()
             .map(|s| s.to_string())
             .ok_or(AppError::SubscribeUrlNotFound)

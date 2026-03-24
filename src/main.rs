@@ -1,11 +1,9 @@
-mod client;
 mod config;
 mod error;
 mod handlers;
 mod service;
 
 use axum::{routing::get, Extension, Router};
-use client::HttpClient;
 use config::Config;
 use dotenvy::dotenv;
 use service::VpnService;
@@ -26,8 +24,7 @@ async fn main() {
         .init();
 
     let config = Config::from_env().expect("Failed to load configuration");
-    let http_client = HttpClient::new().expect("Failed to create HTTP client");
-    let vpn_service = VpnService::new(http_client, config.clone());
+    let vpn_service = VpnService::new(&config);
 
     let app = Router::new()
         .route("/", get(handlers::get_sub))
