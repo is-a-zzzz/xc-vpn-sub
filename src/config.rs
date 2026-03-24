@@ -8,7 +8,7 @@ pub struct Config {
     pub server_host: String,
     pub server_port: u16,
     pub login_url: String,
-    pub subscribe_url: String,
+    pub create_ticket_url: String,
 }
 
 impl Config {
@@ -23,8 +23,8 @@ impl Config {
                 .map_err(|_| AppError::Custom("Invalid SERVER_PORT".to_string()))?,
             login_url: std::env::var("LOGIN_URL")
                 .unwrap_or_else(|_| "https://xcvpn.us/api/v1/passport/auth/login".to_string()),
-            subscribe_url: std::env::var("SUBSCRIBE_URL")
-                .unwrap_or_else(|_| "https://xcvpn.us/api/v1/user/getSubscribe".to_string()),
+            create_ticket_url: std::env::var("CREATE_TICKET_URL")
+                .unwrap_or_else(|_| "https://xcvpn.us/api/v1/user/subscribe/createTicket".to_string()),
         })
     }
 

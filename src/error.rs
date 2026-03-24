@@ -9,8 +9,10 @@ pub enum AppError {
     Reqwest(reqwest::Error),
     LoginFailed { status: reqwest::StatusCode, body: String },
     SubscribeFailed { status: reqwest::StatusCode, body: String },
+    TicketFailed { status: reqwest::StatusCode, body: String },
     AuthDataNotFound,
     SubscribeUrlNotFound,
+    TicketUrlNotFound,
     SerdeJson(serde_json::Error),
     Custom(String),
 }
@@ -26,9 +28,15 @@ impl std::fmt::Display for AppError {
             AppError::SubscribeFailed { status, body } => {
                 write!(f, "Subscribe failed. Status: {}. Body: {}", status, body)
             }
+            AppError::TicketFailed { status, body } => {
+                write!(f, "Ticket creation failed. Status: {}. Body: {}", status, body)
+            }
             AppError::AuthDataNotFound => write!(f, "'auth_data' not found in the login response."),
             AppError::SubscribeUrlNotFound => {
                 write!(f, "'subscribe_url' not found in the response.")
+            }
+            AppError::TicketUrlNotFound => {
+                write!(f, "'next_url' or 'url' not found in the ticket response.")
             }
             AppError::SerdeJson(e) => write!(f, "JSON parsing error: {}", e),
             AppError::Custom(msg) => write!(f, "{}", msg),
@@ -41,11 +49,11 @@ impl std::error::Error for AppError {}
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, message) = match &self {
-            AppError::EnvVar(_) | AppError::AuthDataNotFound | AppError::SubscribeUrlNotFound => {
+            AppError::EnvVar(_) | AppError::AuthDataNotFound | AppError::SubscribeUrlNotFound | AppError::TicketUrlNotFound => {
                 (StatusCode::INTERNAL_SERVER_ERROR, self.to_string())
             }
             AppError::Reqwest(_) => (StatusCode::SERVICE_UNAVAILABLE, self.to_string()),
-            AppError::LoginFailed { .. } | AppError::SubscribeFailed { .. } => {
+            AppError::LoginFailed { .. } | AppError::SubscribeFailed { .. } | AppError::TicketFailed { .. } => {
                 (StatusCode::UNAUTHORIZED, self.to_string())
             }
             AppError::SerdeJson(_) => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),

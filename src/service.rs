@@ -86,15 +86,41 @@ impl VpnService {
     }
 
     async fn fetch_subscribe_url(&self, auth_data: &str) -> Result<String> {
-        info!("Fetching subscription link from {}...", self.config.subscribe_url);
+        info!("Creating ticket from {}...", self.config.create_ticket_url);
 
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert("Authorization", auth_data.parse()?);
 
+        // 第一步：POST createTicket 获取 next_url（需要空 JSON body）
         let response = self
             .client
             .client()
-            .get(&self.config.subscribe_url)
+            .post(&self.config.create_ticket_url)
+            .headers(headers.clone())
+            .json(&serde_json::json!({}))
+            .send()
+            .await?;
+
+        let status = response.status();
+        let body = response.text().await?;
+
+        if !status.is_success() {
+            return Err(AppError::TicketFailed { status, body });
+        }
+
+        let json_body: Value = serde_json::from_str(&body)?;
+        let next_url = json_body["data"]["next_url"]
+            .as_str()
+            .map(|s| s.to_string())
+            .ok_or(AppError::TicketUrlNotFound)?;
+
+        info!("Ticket created, fetching secure subscribe from: {}", next_url);
+
+        // 第二步：GET next_url 获取最终的 secureSubscribe URL
+        let response = self
+            .client
+            .client()
+            .get(&next_url)
             .headers(headers)
             .send()
             .await?;
@@ -106,10 +132,10 @@ impl VpnService {
             return Err(AppError::SubscribeFailed { status, body });
         }
 
-        info!("Subscription link fetched successfully.");
+        info!("Secure subscribe URL fetched successfully.");
         let json_body: Value = serde_json::from_str(&body)?;
 
-        json_body["data"]["subscribe_url"]
+        json_body["data"]["url"]
             .as_str()
             .map(|s| s.to_string())
             .ok_or(AppError::SubscribeUrlNotFound)
