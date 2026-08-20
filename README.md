@@ -37,7 +37,11 @@ The application is containerized and can be run using Docker and Docker Compose.
     SERVER_HOST=0.0.0.0
     SERVER_PORT=3000
     LOGIN_URL=https://xcvpn.us/api/v1/passport/auth/login
-    SUBSCRIBE_URL=https://xcvpn.us/api/v1/user/getSubscribe
+    CREATE_TICKET_URL=https://xcvpn.us/api/v1/user/subscribe/createTicket
+    # 拉取订阅内容时使用的 User-Agent（可选）
+    # 未设置时默认携带官方客户端标识（可获取完整节点列表）
+    # 显式设为空则转发客户端请求自带的 UA
+    SUB_USER_AGENT=Clash/Meta/Mihomo/ClashMetaForAndroid/Bettbox/v2.11.22
     ```
 
     **Note:** `SERVER_HOST`, `SERVER_PORT`, `LOGIN_URL`, and `SUBSCRIBE_URL` are optional and have default values.
@@ -86,7 +90,8 @@ You can also build and run the project directly using Cargo.
     export SERVER_HOST=0.0.0.0
     export SERVER_PORT=3000
     export LOGIN_URL=https://xcvpn.us/api/v1/passport/auth/login
-    export SUBSCRIBE_URL=https://xcvpn.us/api/v1/user/getSubscribe
+    export CREATE_TICKET_URL=https://xcvpn.us/api/v1/user/subscribe/createTicket
+    export SUB_USER_AGENT=Clash/Meta/Mihomo/ClashMetaForAndroid/Bettbox/v2.11.22
     ```
 
     **Note:** Only `XCVPN_EMAIL` and `XCVPN_PASSWORD` are required. Other variables have default values.

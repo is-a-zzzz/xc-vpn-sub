@@ -41,19 +41,33 @@ impl VpnService {
 
         let mut request = self.sub_client.get(&link);
 
+        // 配置了固定 UA 则强制使用；否则透传客户端自带的
+        let forced_ua = (!self.config.sub_user_agent.is_empty())
+            .then(|| self.config.sub_user_agent.as_str());
+
         if let Some(headers) = client_headers {
             debug!("Forwarding {} headers from client request", headers.len());
             for (name, value) in headers.iter() {
                 if matches!(
                     name.as_str(),
-                    "host" | "connection" | "content-length" | "transfer-encoding"
+                    "host" | "connection" | "content-length" | "transfer-encoding" | "accept-encoding"
                 ) {
+                    continue;
+                }
+                if name.as_str() == "user-agent" && forced_ua.is_some() {
                     continue;
                 }
                 debug!("Forwarding header: {}", name);
                 request = request.header(name, value);
             }
         }
+
+        if let Some(ua) = forced_ua {
+            request = request.header("User-Agent", ua);
+        }
+
+        // 设置合适的 Accept 头以避免 406 错误
+        request = request.header("Accept", "*/*");
 
         let response = request.send().await?;
 
